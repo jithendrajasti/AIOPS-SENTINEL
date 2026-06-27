@@ -45,14 +45,15 @@ graph TD
 
     subgraph Central Brain Backend
         CONSUMER[Kafka Consumer]
-        AI[Gemini RAG Engine]
-        API[Express API]
+        API[Express API / Services]
         SOCKETS[Socket.IO Gateway]
+        AI[Gemini RCA Engine]
         
         KAFKA --> CONSUMER
-        CONSUMER --> AI
-        AI --> API
-        CONSUMER --> SOCKETS
+        CONSUMER -- "1. Detect Anomaly" --> API
+        API -- "2. Live Alert" --> SOCKETS
+        API -- "3. Trigger RCA" --> AI
+        AI -- "4. RCA Results" --> SOCKETS
     end
 
     subgraph Data Layer
@@ -60,9 +61,10 @@ graph TD
         REDIS[(Redis Metrics)]
         PINECONE[(Pinecone Vector DB)]
         
-        API --> PG
-        AI --> PINECONE
-        CONSUMER --> REDIS
+        CONSUMER -- "Update KPIs" --> REDIS
+        API -- "Save Incident" --> PG
+        AI -- "Query Past Fixes" --> PINECONE
+        API -- "User marks Golden Record" --> PINECONE
     end
 
     subgraph Next.js Frontend
