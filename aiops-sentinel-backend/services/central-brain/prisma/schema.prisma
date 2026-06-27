@@ -1,0 +1,59 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  role      String   @default("SRE")
+  password   String
+  platformId String   @default("default-platform")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Incident {
+  id              String    @id
+  code            String    @unique
+  title           String
+  description     String
+  service         String
+  severity        String
+  status          String    @default("open")
+  platformId      String    @default("default-platform")
+  createdAt       DateTime
+  resolvedAt      DateTime?
+  assignedTo      String    @default("AI Engine")
+  environment     String    @default("Production")
+  rootCause       String
+  suggestedFix    String    @default("")
+  confidence      Int
+  affectedSystems String    // JSON array
+  similarCount    Int       @default(0)
+  impactedUsers   Int       @default(0)
+  errorRate       Float     @default(0)
+  anomalyId       String?
+  recentLogs      String    @default("[]") // JSON array of LogLine
+
+  @@index([platformId, createdAt])
+}
+
+model GoldenRecord {
+  id         String   @id @default(uuid())
+  pineconeId String   @unique
+  title      String
+  issue      String
+  resolution String
+  source     String
+  tags       String   @default("[]") // JSON array
+  hitCount   Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
