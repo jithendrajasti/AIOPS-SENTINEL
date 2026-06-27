@@ -1,0 +1,165 @@
+version: '3.8'
+
+# ── Production Stack ──────────────────────────────────────────────────────────
+# Requires a root .env file with secrets (see .env.example).
+# On EC2, Kafka/Redis/services all run inside Docker on the same bridge network.
+# The log-collector reads logs from the host path ${LOG_VOLUME_PATH}
+# (default: /var/log/aiops) — mount your application log directory there.
+#
+# To use a managed cloud Kafka (Confluent Cloud, MSK) instead of the bundled
+# broker, remove the zookeeper/kafka services and set KAFKA_BROKERS,
+# KAFKA_SASL_MECHANISM, KAFKA_SASL_USERNAME, KAFKA_SASL_PASSWORD in the
+# central-brain and log-collector environments.
+
+services:
+  # ── Zookeeper ────────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: aiops-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Kafka ────────────────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: aiops-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── Redis ────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: aiops-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  # For production on AWS, replace this with RDS and set DATABASE_URL externally.
+  postgres:
+    image: postgres:16-alpine
+    container_name: aiops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aiops_sentinel}
+      POSTGRES_USER: ${POSTGRES_USER:-aiops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aiops} -d ${POSTGRES_DB:-aiops_sentinel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Log Collector ─────────────────────────────────────────────────────────────
+  log-collector:
+    build:
+      context: ./services/log-collector
+      dockerfile: Dockerfile
+    image: aiops/log-collector:latest
+    container_name: aiops-log-collector
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_TOPIC: raw-logs
+      KAFKA_CLIENT_ID: aiops-log-collector
+      USE_KAFKA: "true"
+      LOG_FILE_PATH: /var/log/aiops/app.log
+      POLL_INTERVAL_MS: "500"
+      # ── Cloud Kafka auth (Confluent Cloud / MSK) ──────────────────────────────
+      # Remove the zookeeper/kafka services above and uncomment these when using
+      # a managed Kafka cluster. Set KAFKA_BROKERS to your cloud bootstrap servers.
+      # KAFKA_SASL_MECHANISM: plain           # or scram-sha-512 for MSK
+      # KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME}
+      # KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD}
+    volumes:
+      - ${LOG_VOLUME_PATH:-/var/log/aiops}:/var/log/aiops:ro
+
+  # ── Central Brain ─────────────────────────────────────────────────────────────
+  central-brain:
+    build:
+      context: ./services/central-brain
+      dockerfile: Dockerfile
+    image: aiops/central-brain:latest
+    container_name: aiops-central-brain
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: "4000"
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aiops_sentinel}}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — generate with: openssl rand -base64 48}
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_TOPIC: raw-logs
+      KAFKA_GROUP_ID: aiops-central-brain-group
+      KAFKA_CLIENT_ID: aiops-central-brain
+      REDIS_URL: redis://redis:6379
+      USE_KAFKA: "true"
+      MOCK_AI: "false"
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN must be set to your frontend domain}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY is required}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      PINECONE_API_KEY: ${PINECONE_API_KEY:?PINECONE_API_KEY is required}
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME:-aiops-incidents}
+      # ── Cloud Kafka auth (Confluent Cloud / MSK) ──────────────────────────────
+      # KAFKA_SASL_MECHANISM: plain
+      # KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME}
+      # KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD}
+
+volumes:
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: aiops-network

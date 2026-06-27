@@ -1,0 +1,91 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Prevent overlapping deploys — new push cancels any in-progress deploy.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  # ── Gate: type-check must pass before we touch EC2 ───────────────────────────
+  verify:
+    name: Pre-deploy Verification
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [log-collector, central-brain]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - run: npm ci
+        working-directory: services/${{ matrix.service }}
+
+      - run: npm run type-check
+        working-directory: services/${{ matrix.service }}
+
+  # ── Deploy ────────────────────────────────────────────────────────────────────
+  deploy:
+    name: SSH Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [verify]
+    environment: production  # Requires 'production' environment in GitHub repo settings
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          # All commands run on the EC2 instance
+          script: |
+            set -e
+
+            echo "==> Pulling latest changes from main..."
+            cd ~/aiops-sentinel-backend
+            git pull origin main
+
+            echo "==> Rebuilding and restarting all services..."
+            docker compose -f docker-compose.prod.yml up --build -d --remove-orphans
+
+            echo "==> Waiting for central-brain to stabilize (15s)..."
+            sleep 15
+
+            echo "==> Health check..."
+            curl -sf http://localhost:4000/health \
+              || (echo "HEALTH CHECK FAILED — rolling back" && docker compose -f docker-compose.prod.yml down && exit 1)
+
+            echo "==> Deployment successful!"
+            docker compose -f docker-compose.prod.yml ps
+
+# ── Required GitHub Secrets ───────────────────────────────────────────────────
+# EC2_HOST      — public IP or domain of your EC2 instance
+# EC2_USER      — SSH user (e.g. ubuntu, ec2-user)
+# EC2_SSH_KEY   — contents of the private .pem key (not base64-encoded)
+#
+# Set these at: repo → Settings → Secrets and variables → Actions
+#
+# ── EC2 Pre-requisites ────────────────────────────────────────────────────────
+# 1. Install Docker + Docker Compose plugin on EC2:
+#    sudo apt-get update && sudo apt-get install -y docker.io docker-compose-plugin
+#    sudo usermod -aG docker $USER
+#
+# 2. Clone the repo into ~/aiops-sentinel-backend:
+#    git clone https://github.com/<your-org>/<your-repo>.git ~/aiops-sentinel-backend
+#
+# 3. Create the root .env from .env.example:
+#    cp .env.example .env && nano .env
+#
+# 4. Create the log volume directory:
+#    sudo mkdir -p /var/log/aiops && sudo chown $USER:$USER /var/log/aiops
