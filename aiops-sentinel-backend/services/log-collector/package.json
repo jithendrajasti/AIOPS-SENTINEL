@@ -1,0 +1,24 @@
+{
+  "name": "aiops-log-collector",
+  "version": "1.0.0",
+  "description": "AI-Ops Sentinel — standalone log tailing agent",
+  "main": "dist/collector.js",
+  "bin": {
+    "aiops-log-collector": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/collector.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/collector.ts",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "kafkajs": "^2.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.5.4"
+  }
+}
