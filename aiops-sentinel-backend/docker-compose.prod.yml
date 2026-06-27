@@ -136,7 +136,7 @@ services:
       PORT: "4000"
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aiops_sentinel}}
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — generate with: openssl rand -base64 48}
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set — generate with: openssl rand -base64 48}"
       KAFKA_BROKERS: kafka:29092
       KAFKA_TOPIC: raw-logs
       KAFKA_GROUP_ID: aiops-central-brain-group
