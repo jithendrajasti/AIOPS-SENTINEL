@@ -1,0 +1,20 @@
+{
+  "name": "aiops-log-generator",
+  "version": "1.0.0",
+  "description": "Synthetic log generator — sends realistic log patterns to Kafka to drive anomaly detection",
+  "main": "dist/generator.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/generator.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/generator.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "kafkajs": "^2.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.5.4"
+  }
+}
