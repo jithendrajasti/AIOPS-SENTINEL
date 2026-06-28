@@ -10,7 +10,7 @@ import { SystemMessage, HumanMessage } from '@langchain/core/messages';
 
 const MOCK_AI = process.env.MOCK_AI === 'true';
 const EMBED_MODEL = 'llama-text-embed-v2';
-const CHAT_MODEL = process.env.GEMINI_MODEL ?? 'gemini-1.5-flash-latest';
+const CHAT_MODEL = process.env.GEMINI_MODEL ?? 'gemini-1.5-pro-latest';
 const SIMILARITY_THRESHOLD = 0.7;
 const DEDUP_THRESHOLD = 0.95;       // above this → update hitCount instead of inserting
 const TTL_MS = 180 * 24 * 3600 * 1_000;  // 6 months in milliseconds
