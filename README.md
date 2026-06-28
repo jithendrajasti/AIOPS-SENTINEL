@@ -33,8 +33,8 @@
 ```mermaid
 graph TD
     subgraph Client Infrastructure
-        LC[Log Collector CLI]
         APP[App Logs]
+        LC[Log Collector CLI]
         APP --> LC
     end
 
@@ -44,8 +44,8 @@ graph TD
     end
 
     subgraph Central Brain Backend
-        CONSUMER[Kafka Consumer]
-        API[Express API / Services]
+        CONSUMER[Background Kafka Consumer]
+        API[Express API & Services]
         SOCKETS[Socket.IO Gateway]
         AI[Gemini RCA Engine]
         
@@ -58,14 +58,16 @@ graph TD
 
     subgraph Data Layer
         PG[(PostgreSQL)]
-        REDIS[(Redis Metrics)]
+        REDIS[(Redis Metrics & Cache)]
         PINECONE[(Pinecone Vector DB)]
-        
-        CONSUMER -- "Update KPIs" --> REDIS
-        API -- "Save Incident" --> PG
-        AI -- "Query Past Fixes" --> PINECONE
-        API -- "User marks Golden Record" --> PINECONE
     end
+
+    %% Data Connections
+    CONSUMER -- "Directly Update KPIs" --> REDIS
+    API -- "Fetch KPIs for Dashboard" --> REDIS
+    API -- "Save Incident" --> PG
+    AI -- "Query Past Fixes" --> PINECONE
+    API -- "User marks Golden Record" --> PINECONE
 
     subgraph Next.js Frontend
         UI[Web Dashboard]
