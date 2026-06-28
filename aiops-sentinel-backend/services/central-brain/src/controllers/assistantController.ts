@@ -122,19 +122,41 @@ assistantRouter.post('/', requireAuth, async (req: AuthRequest, res: Response) =
       return;
     }
 
-    const [incidentRes, goldenRes] = await Promise.all([
+    // Detect a specific incident code in the message so we can fetch it by name
+    const codeInMsg = message.match(/INC-[\w-]+/i)?.[0] ?? null;
+
+    const [incidentRes, goldenRes, specificRes] = await Promise.all([
       pool.query<{
         code: string; title: string; service: string; severity: string;
         status: string; rootCause: string; suggestedFix: string; confidence: number;
       }>(
-        `SELECT code, title, service, severity, status, "rootCause", "suggestedFix", confidence
-         FROM "Incident" WHERE "platformId" = $1 ORDER BY "createdAt" DESC LIMIT 10`,
+        `SELECT code, title, service, LOWER(severity) AS severity, status, "rootCause", "suggestedFix", confidence
+         FROM "Incident" WHERE "platformId" = $1 ORDER BY "createdAt" DESC LIMIT 50`,
         [platformId],
       ),
       pool.query<{ issue: string; resolution: string; source: string }>(
         `SELECT issue, resolution, source FROM "GoldenRecord" ORDER BY "hitCount" DESC LIMIT 5`,
       ),
+      codeInMsg
+        ? pool.query<{
+            code: string; title: string; service: string; severity: string;
+            status: string; rootCause: string; suggestedFix: string; confidence: number;
+          }>(
+            `SELECT code, title, service, LOWER(severity) AS severity, status, "rootCause", "suggestedFix", confidence
+             FROM "Incident" WHERE "platformId" = $1 AND LOWER(code) = LOWER($2) LIMIT 1`,
+            [platformId, codeInMsg],
+          )
+        : Promise.resolve(null),
     ]);
+
+    // Merge the specifically-requested incident into the top of the list (if not already present)
+    if (specificRes?.rows[0]) {
+      const specificCode = specificRes.rows[0].code.toLowerCase();
+      const alreadyIn = incidentRes.rows.some(r => r.code.toLowerCase() === specificCode);
+      if (!alreadyIn) {
+        incidentRes.rows.unshift(specificRes.rows[0]);
+      }
+    }
 
     const incidentContext = incidentRes.rows.length > 0
       ? incidentRes.rows.map(i =>
