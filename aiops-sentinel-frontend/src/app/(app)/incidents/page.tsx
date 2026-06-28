@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Search, SlidersHorizontal, AlertCircle, ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,9 +26,16 @@ import { useSocketData } from "@/context/socket-context";
 export default function IncidentsPage() {
   const { incidents: liveIncidents } = useSocketData();
   const [dbIncidents, setDbIncidents] = useState<Incident[]>([]);
-  const [query, setQuery] = useState("");
+  const searchParams = useSearchParams();
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
   const [severity, setSeverity] = useState<string>("all");
   const [status, setStatus] = useState<string>("all");
+
+  // Keep query in sync if the URL param changes (e.g. topbar search navigation)
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q !== null) setQuery(q);
+  }, [searchParams]);
 
   useEffect(() => {
     apiFetch<{ incidents: Incident[] }>("/api/incidents")
