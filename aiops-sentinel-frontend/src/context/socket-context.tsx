@@ -85,6 +85,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       socket.off(SOCKET_EVENTS.INCIDENT_UPDATE, onIncidentUpdate);
       socket.off(SOCKET_EVENTS.KPI_UPDATE, onKpiUpdate);
       socket.off(SOCKET_EVENTS.TIMELINE, onTimeline);
+      socket.disconnect();
     };
   }, [liveStream, token]);
 

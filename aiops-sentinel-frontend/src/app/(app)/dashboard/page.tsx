@@ -202,7 +202,7 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-3">
                     <ServiceStatusBadge status={svc.status} />
                     <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
-                      {svc.uptime.toFixed(1)}%
+                      {(svc.uptime ?? 0).toFixed(1)}%
                     </span>
                   </div>
                 </Link>

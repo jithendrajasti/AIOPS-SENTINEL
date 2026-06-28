@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -42,6 +42,7 @@ export default function IncidentDetailPage() {
   const [grTags, setGrTags] = useState("");
   const [grSaving, setGrSaving] = useState(false);
   const [grSaved, setGrSaved] = useState(false);
+  const grCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!params.id) return;
@@ -57,6 +58,12 @@ export default function IncidentDetailPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [params.id]);
+
+  useEffect(() => {
+    return () => {
+      if (grCloseTimer.current) clearTimeout(grCloseTimer.current);
+    };
+  }, []);
 
   async function updateStatus(status: "resolved" | "dismissed") {
     if (!incident) return;
@@ -94,7 +101,7 @@ export default function IncidentDetailPage() {
         body: JSON.stringify({ issue: grIssue, resolution: grRemediation, source: grService, tags }),
       });
       setGrSaved(true);
-      setTimeout(() => setShowGRModal(false), 1200);
+      grCloseTimer.current = setTimeout(() => setShowGRModal(false), 1200);
     } catch (err) {
       console.error("Failed to create golden record:", err);
     } finally {
