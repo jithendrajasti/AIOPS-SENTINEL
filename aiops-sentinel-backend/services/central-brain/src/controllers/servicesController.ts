@@ -109,27 +109,38 @@ servicesRouter.get('/:id', requireAuth, async (req: AuthRequest, res: Response) 
       return;
     }
 
-    const [totalRaw, errorsRaw, isMember] = await Promise.all([
+    const [totalRaw, errorsRaw, isMember, countRows, recentIncidents] = await Promise.all([
       redis.get(`aiops:source:${platformId}:${id}:total`),
       redis.get(`aiops:source:${platformId}:${id}:errors`),
       redis.sIsMember(`aiops:metrics:${platformId}:active_sources`, id),
+      pool.query<{ count: string; total: string }>(
+        `SELECT COUNT(*) FILTER (WHERE status != 'resolved') AS count, COUNT(*) AS total
+         FROM "Incident" WHERE service = $1 AND "platformId" = $2`,
+        [id, platformId],
+      ),
+      pool.query<{ id: string; code: string; title: string; severity: string; status: string }>(
+        `SELECT id, code, title, severity, status FROM "Incident" WHERE service = $1 AND "platformId" = $2 ORDER BY "createdAt" DESC LIMIT 4`,
+        [id, platformId],
+      ),
     ]);
 
-    if (!isMember) {
-      res.status(404).json({ error: 'Service not found or inactive' });
+    const incidentCount  = parseInt(countRows.rows[0]?.count ?? '0', 10);
+    const incidentTotal  = parseInt(countRows.rows[0]?.total ?? '0', 10);
+
+    // Require the service to be known: either live in Redis or has historical incidents
+    if (!isMember && incidentTotal === 0) {
+      res.status(404).json({ error: 'Service not found' });
       return;
     }
 
     const total = Number(totalRaw ?? 0);
     const errs  = Number(errorsRaw ?? 0);
-    const errorRate = total > 0 ? errs / total : 0;
+    const errorRate = total > 0
+      ? errs / total
+      : incidentTotal > 0
+        ? Math.min(incidentCount / incidentTotal, 1)
+        : 0;
     const status = deriveStatus(errorRate);
-
-    const { rows: countRows } = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM "Incident" WHERE service = $1 AND status != 'resolved' AND "platformId" = $2`,
-      [id, platformId],
-    );
-    const incidentCount = parseInt(countRows[0]?.count ?? '0', 10);
 
     const service = {
       id,
@@ -144,16 +155,9 @@ servicesRouter.get('/:id', requireAuth, async (req: AuthRequest, res: Response) 
       incidents: incidentCount,
     };
 
-    const { rows: recentIncidents } = await pool.query<{
-      id: string; code: string; title: string; severity: string; status: string;
-    }>(
-      `SELECT id, code, title, severity, status FROM "Incident" WHERE service = $1 AND "platformId" = $2 ORDER BY "createdAt" DESC LIMIT 4`,
-      [id, platformId],
-    );
-
     res.json({
       service,
-      recentIncidents: recentIncidents.map(r => ({
+      recentIncidents: recentIncidents.rows.map(r => ({
         id: r.id, code: r.code, title: r.title,
         severity: r.severity.toLowerCase(), status: r.status,
       })),
