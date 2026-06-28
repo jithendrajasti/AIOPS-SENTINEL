@@ -31,49 +31,53 @@
 ## 🏗️ Architecture
 
 ```mermaid
-graph TD
-    subgraph Client Infrastructure
-        APP[App Logs]
-        LC[Log Collector CLI]
-        APP --> LC
+flowchart TD
+    subgraph Client ["🖥️ Client Infrastructure"]
+        APP(["📱 App Logs"])
+        LC(["💻 Log Collector CLI"])
+        APP -.-> LC
     end
 
-    subgraph Message Broker
-        KAFKA[(Apache Kafka)]
-        LC -- "Streams (includes Platform ID)" --> KAFKA
+    subgraph Broker ["⚡ Message Broker"]
+        KAFKA[("🌪️ Apache Kafka")]
     end
 
-    subgraph Central Brain Backend
-        CONSUMER[Background Kafka Consumer]
-        API[Express API & Services]
-        SOCKETS[Socket.IO Gateway]
-        AI[Gemini RCA Engine]
-        
-        KAFKA --> CONSUMER
-        CONSUMER -- "1. Detect Anomaly" --> API
-        API -- "2. Live Alert" --> SOCKETS
-        API -- "3. Trigger RCA" --> AI
-        AI -- "4. RCA Results" --> SOCKETS
+    subgraph Backend ["🧠 Central Brain Backend"]
+        CONSUMER[["⚙️ Background Consumer"]]
+        API[["🔌 Express API"]]
+        SOCKETS[["📡 Socket.IO Gateway"]]
+        AI{{"🤖 Gemini RCA Engine"}}
     end
 
-    subgraph Data Layer
-        PG[(PostgreSQL)]
-        REDIS[(Redis Metrics & Cache)]
-        PINECONE[(Pinecone Vector DB)]
+    subgraph DataLayer ["🗄️ Data Layer"]
+        REDIS[("⚡ Redis (Metrics)")]
+        PG[("🐘 PostgreSQL")]
+        PINECONE[("🌲 Pinecone Vector DB")]
     end
 
-    %% Data Connections
-    CONSUMER -- "Directly Update KPIs" --> REDIS
-    API -- "Fetch KPIs for Dashboard" --> REDIS
-    API -- "Save Incident" --> PG
-    AI -- "Query Past Fixes" --> PINECONE
-    API -- "User marks Golden Record" --> PINECONE
-
-    subgraph Next.js Frontend
-        UI[Web Dashboard]
-        API -- "REST (NextAuth v5)" --> UI
-        SOCKETS -- "JWT Auth & Room Scoping" --> UI
+    subgraph FrontendApp ["🌐 Next.js Frontend"]
+        UI(["🖥️ Web Dashboard"])
     end
+
+    %% Flow
+    LC ==>|"Streams Logs"| KAFKA
+    
+    KAFKA ==>|"Consumes Firehose"| CONSUMER
+    CONSUMER -.->|"1. Detect Anomaly"| API
+    CONSUMER ==>|"Directly Update KPIs"| REDIS
+    
+    API <-->|"Fetch KPIs"| REDIS
+    API <-->|"Save Incident"| PG
+    API -.->|"Mark Golden Record"| PINECONE
+    
+    API -.->|"2. Live Alert"| SOCKETS
+    API -.->|"3. Trigger RCA"| AI
+    
+    PINECONE -.->|"Past Fixes (Context)"| AI
+    AI -.->|"4. RCA Results"| SOCKETS
+
+    API <-->|"REST API"| UI
+    SOCKETS <-->|"WebSockets"| UI
 ```
 
 ---
