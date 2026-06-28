@@ -5,6 +5,7 @@ import { Kafka, Producer, logLevel } from 'kafkajs';
 
 const BROKERS       = (process.env.KAFKA_BROKERS ?? 'localhost:9092').split(',');
 const TOPIC         = 'raw-logs';
+const PLATFORM_ID   = process.env.PLATFORM_ID ?? 'default-platform';
 const INTERVAL_MS   = Number(process.env.LOG_INTERVAL_MS   ?? 300);
 const BURST_MS      = Number(process.env.BURST_INTERVAL_MS ?? 30_000);
 const BURST_SIZE    = Number(process.env.BURST_SIZE        ?? 25);
@@ -84,6 +85,7 @@ interface LogMessage {
   source: string;
   raw: string;
   lineNumber: number;
+  platformId: string;
 }
 
 // ── Kafka producer ─────────────────────────────────────────────────────────────
@@ -135,6 +137,7 @@ async function main(): Promise<void> {
           source: burstSvc,
           raw,
           lineNumber: lineNumber++,
+          platformId: PLATFORM_ID,
         }).catch((err: Error) => console.error('[Generator] Send error:', err.message));
       }
       return;
@@ -149,6 +152,7 @@ async function main(): Promise<void> {
       source: svc,
       raw,
       lineNumber: lineNumber++,
+      platformId: PLATFORM_ID,
     }).catch((err: Error) => console.error('[Generator] Send error:', err.message));
   }, INTERVAL_MS);
 

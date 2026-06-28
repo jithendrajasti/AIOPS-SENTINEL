@@ -58,7 +58,9 @@ export async function startKafkaConsumer(io: Server): Promise<KafkaConsumerHandl
 
       let log: LogMessage;
       try {
-        log = JSON.parse(message.value.toString()) as LogMessage;
+        const parsed = JSON.parse(message.value.toString()) as LogMessage;
+        // Ensure platformId is always set — old producers (log-generator pre-fix) omit it
+        log = { ...parsed, platformId: parsed.platformId ?? 'default-platform' };
       } catch {
         // Never throw inside eachMessage — KafkaJS would retry the message forever
         console.warn('[KafkaConsumer] Skipping malformed message');

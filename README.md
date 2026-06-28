@@ -118,15 +118,16 @@ npm run dev
 ```
 Open `http://localhost:3000` in your browser. Create an account, or log in with the seeded credentials (`arjun.dev@aiops-sentinel.io` / `SentinelSRE@2026`).
 
-### 4. Stream Test Logs (`log-collector`)
+### 4. Stream Test Logs (`log-generator`)
 In a new terminal window, simulate an application crash to see the system in action:
 ```bash
-cd aiops-sentinel-backend/services/log-collector
+cd aiops-sentinel-backend/services/log-generator
 npm install
-npm run write:logs  # Writes fake crash logs to sample.log
-npm run dev         # Tails the log file and streams to Kafka
+npm run dev         # Streams synthetic logs + periodic error bursts directly to Kafka
 ```
 Watch your frontend dashboard — the AI will instantly pick up the anomaly, analyze it, and pop up a new Incident Card in real-time!
+
+> **Note:** The log-generator sends one burst of FATAL/CRITICAL errors every 30 seconds to trigger anomaly detection. Set `BURST_INTERVAL_MS=5000` in a local `.env` to trigger bursts more frequently.
 
 ---
 
