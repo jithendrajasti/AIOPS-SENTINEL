@@ -1,5 +1,7 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type Response } from 'express';
 import { ingestResolution } from '../services/ragPipeline';
+import { requireAuth } from '../middleware/authMiddleware';
+import type { AuthRequest } from '../middleware/authMiddleware';
 import type { ResolutionPayload } from '../types/index';
 
 export const resolutionRouter = Router();
@@ -8,7 +10,7 @@ export const resolutionRouter = Router();
 // Validates the developer's resolution, runs the Post-Resolution Pipeline
 // (dedup + embed + upsert to Pinecone), and returns the ingested record info.
 
-resolutionRouter.post('/', async (req: Request, res: Response): Promise<void> => {
+resolutionRouter.post('/', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   const { anomalyId, source, issue, resolution } = req.body as Partial<ResolutionPayload>;
 
   if (!anomalyId || !source || !issue || !resolution) {
