@@ -105,7 +105,7 @@ export function mapRcaToTimelineEvent(rca: RcaResult): FrontendTimelineEvent {
   };
 }
 
-export function mapMetricsToKpis(m: AppMetrics): FrontendKPI[] {
+export function mapMetricsToKpis(m: AppMetrics, criticalOpenCount = 0): FrontendKPI[] {
   const currentMinKey = String(Math.floor(Date.now() / 60_000));
   const volNow = m.volumePerMinute[currentMinKey] ?? 0;
 
@@ -113,9 +113,9 @@ export function mapMetricsToKpis(m: AppMetrics): FrontendKPI[] {
     {
       id: 'critical',
       label: 'Critical Incidents',
-      value: String(m.anomalyCount),
-      trend: m.anomalyCount > 0 ? 'up' : 'down',
-      tone: m.anomalyCount > 0 ? 'danger' : 'success',
+      value: String(criticalOpenCount),
+      trend: criticalOpenCount > 0 ? 'up' : 'down',
+      tone: criticalOpenCount > 0 ? 'danger' : 'success',
       icon: 'alert-triangle',
     },
     {

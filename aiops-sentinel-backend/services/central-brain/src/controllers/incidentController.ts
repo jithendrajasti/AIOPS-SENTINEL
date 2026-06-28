@@ -80,7 +80,7 @@ incidentRouter.patch('/:id/status', requireAuth, async (req: AuthRequest, res: R
     if (!rows[0]) { res.status(404).json({ error: 'Incident not found' }); return; }
     const updated = serialize(rows[0]);
     try {
-      getIO().emit('incident:update', updated);
+      getIO().to(platformId!).emit('incident:update', updated);
     } catch (err) {
       console.error('[IncidentController] emit error:', err);
     }

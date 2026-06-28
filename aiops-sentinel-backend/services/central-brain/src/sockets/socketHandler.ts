@@ -2,6 +2,7 @@ import type { Server, Socket } from 'socket.io';
 import { getMetrics } from '../services/metricsAggregator';
 import { mapMetricsToKpis } from '../services/frontendAdapter';
 import { verifyToken } from '../services/authService';
+import { getPool } from '../config/database';
 
 const METRICS_INTERVAL_MS = 3_000;
 
@@ -52,10 +53,19 @@ export function initSocketHandler(io: Server): void {
   // Push a live metrics snapshot to active platforms every 3 seconds
   metricsInterval = setInterval(() => {
     for (const platformId of activePlatforms.keys()) {
-      getMetrics(platformId)
-        .then(data => {
+      Promise.all([
+        getMetrics(platformId),
+        getPool().query<{ count: string }>(
+          `SELECT COUNT(*) AS count FROM "Incident"
+           WHERE "platformId" = $1 AND severity = 'CRITICAL'
+           AND status NOT IN ('resolved', 'dismissed')`,
+          [platformId],
+        ),
+      ])
+        .then(([data, critRes]) => {
+          const criticalOpenCount = parseInt(critRes.rows[0]?.count ?? '0', 10);
           io.to(platformId).emit('metrics:update', data);
-          io.to(platformId).emit('kpi:update', mapMetricsToKpis(data));
+          io.to(platformId).emit('kpi:update', mapMetricsToKpis(data, criticalOpenCount));
         })
         .catch((err: Error) => console.error(`[Socket.IO] Metrics push failed for ${platformId}:`, err.message));
     }
