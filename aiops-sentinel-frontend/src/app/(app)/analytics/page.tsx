@@ -20,10 +20,10 @@ interface GoldenRecordUsage {
 
 interface AnalyticsData {
   analyticsKpis: KPI[];
-  incidentsOverTime: { x: string; incidents: number }[];
+  incidentsOverTime: { date: string; incidents: number }[];
   incidentsByService: { name: string; value: number; color: string }[];
   topRootCauses: { name: string; value: number }[];
-  mttrOverTime: { x: string; mttr: number }[];
+  mttrOverTime: { date: string; mttr: number }[];
   goldenRecordUsage: GoldenRecordUsage;
 }
 

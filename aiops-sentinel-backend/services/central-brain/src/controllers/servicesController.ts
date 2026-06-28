@@ -32,7 +32,7 @@ servicesRouter.get('/', requireAuth, async (req: AuthRequest, res: Response) => 
       return;
     }
 
-    const redisSources = await redis.sMembers('aiops:metrics:active_sources');
+    const redisSources = await redis.sMembers(`aiops:metrics:${platformId}:active_sources`);
 
     const { rows: incidentCounts } = await pool.query<{ service: string; count: string; total: string }>(
       `SELECT service,
@@ -56,8 +56,8 @@ servicesRouter.get('/', requireAuth, async (req: AuthRequest, res: Response) => 
     }
 
     // Fetch Redis metrics (may be empty if log-collector is not running)
-    const totalKeys = sources.map(s => `aiops:source:${s}:total`);
-    const errorKeys = sources.map(s => `aiops:source:${s}:errors`);
+    const totalKeys = sources.map(s => `aiops:source:${platformId}:${s}:total`);
+    const errorKeys = sources.map(s => `aiops:source:${platformId}:${s}:errors`);
     const [totals, errors] = await Promise.all([
       redis.mGet(totalKeys),
       redis.mGet(errorKeys),
@@ -102,11 +102,17 @@ servicesRouter.get('/:id', requireAuth, async (req: AuthRequest, res: Response) 
     const { id } = req.params;
     const redis = await getRedisClient();
     const pool = getPool();
+    const platformId = req.user?.platformId;
+
+    if (!platformId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
 
     const [totalRaw, errorsRaw, isMember] = await Promise.all([
-      redis.get(`aiops:source:${id}:total`),
-      redis.get(`aiops:source:${id}:errors`),
-      redis.sIsMember('aiops:metrics:active_sources', id),
+      redis.get(`aiops:source:${platformId}:${id}:total`),
+      redis.get(`aiops:source:${platformId}:${id}:errors`),
+      redis.sIsMember(`aiops:metrics:${platformId}:active_sources`, id),
     ]);
 
     if (!isMember) {
@@ -119,7 +125,6 @@ servicesRouter.get('/:id', requireAuth, async (req: AuthRequest, res: Response) 
     const errorRate = total > 0 ? errs / total : 0;
     const status = deriveStatus(errorRate);
 
-    const platformId = req.user?.platformId;
     const { rows: countRows } = await pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM "Incident" WHERE service = $1 AND status != 'resolved' AND "platformId" = $2`,
       [id, platformId],

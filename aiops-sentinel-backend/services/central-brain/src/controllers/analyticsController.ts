@@ -92,7 +92,7 @@ analyticsRouter.get('/', requireAuth, async (req: AuthRequest, res: Response) =>
     // Summary — volume from Redis
     const redis = await getRedisClient();
     const nowMinute = Math.floor(Date.now() / 60_000);
-    const volKeys = Array.from({ length: 15 }, (_, i) => `aiops:metrics:volume:${nowMinute - i}`);
+    const volKeys = Array.from({ length: 15 }, (_, i) => `aiops:metrics:${platformId}:volume:${nowMinute - i}`);
     const volRaw = await redis.mGet(volKeys);
     const volume = volRaw.map((v, i) => ({
       x: new Date((nowMinute - i) * 60_000).toISOString().slice(11, 16),
