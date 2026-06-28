@@ -140,12 +140,35 @@ Security and data isolation are critical. AI-Ops Sentinel implements multi-tenan
 
 ---
 
-## 📚 Documentation
+## 🛠️ Environment Variables
 
-For complete, detailed instructions on how to deploy this stack to production (Vercel + AWS EC2) and secure the environment, please see the Deployment Manuals:
+### Backend (`aiops-sentinel-backend/services/central-brain/.env`)
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `REDIS_URL` | Yes | Redis connection string |
+| `JWT_SECRET` | Yes | Secret for signing JWTs |
+| `KAFKA_BROKERS` | Yes | Comma-separated Kafka broker addresses |
+| `GEMINI_API_KEY` | No* | Google AI Studio API key |
+| `PINECONE_API_KEY` | No* | Pinecone Vector DB API key |
+| `PINECONE_INDEX` | No* | Pinecone index name |
+| `MOCK_AI` | No | Set to `true` to skip Gemini/Pinecone (local dev) |
 
-- 📖 [Deployment Manual](deployment_manual.md) - Master guide to architecture, building, and deploying.
-- 📖 [Post-Deployment Testing Guide](post_deployment_guide.md) - How to test Kafka, Sockets, and NGINX in production.
+*Not required when `MOCK_AI=true`.
+
+### Frontend (`aiops-sentinel-frontend/.env.local`)
+| Variable | Required | Description |
+|---|---|---|
+| `NEXTAUTH_SECRET` | Yes | Secret for NextAuth session encryption |
+| `NEXTAUTH_URL` | Yes | Public URL of the frontend (e.g., `http://localhost:3000`) |
+| `NEXT_PUBLIC_API_URL` | Yes | Backend API base URL (e.g., `http://localhost:4000`) |
+| `NEXT_PUBLIC_SOCKET_URL` | Yes | Backend Socket.IO URL (e.g., `http://localhost:4000`) |
+
+### Log Collector (`aiops-sentinel-backend/services/log-collector/.env`)
+| Variable | Required | Description |
+|---|---|---|
+| `KAFKA_BROKERS` | Yes | Comma-separated Kafka broker addresses |
+| `PLATFORM_ID` | Yes | Tenant identifier (must match a registered user's platformId) |
 
 ---
 
