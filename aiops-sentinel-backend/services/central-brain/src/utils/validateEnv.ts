@@ -5,8 +5,8 @@ export function validateEnv(): void {
 
   const errors: string[] = [];
 
-  if (!process.env.GEMINI_API_KEY && process.env.MOCK_AI !== 'true') {
-    errors.push('GEMINI_API_KEY is required in production (or set MOCK_AI=true)');
+  if (!process.env.NVIDIA_API_KEY && process.env.MOCK_AI !== 'true') {
+    errors.push('NVIDIA_API_KEY is required in production (or set MOCK_AI=true)');
   }
   if (!process.env.PINECONE_API_KEY && process.env.MOCK_AI !== 'true') {
     errors.push('PINECONE_API_KEY is required in production (or set MOCK_AI=true)');

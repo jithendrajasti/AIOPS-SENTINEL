@@ -2,21 +2,22 @@ import { v4 as uuidv4 } from 'uuid';
 import { getPineconeIndex } from '../config/pinecone';
 import { getPool } from '../config/database';
 import type { Anomaly, RcaResult, ResolutionPayload, GoldenRecordMetadata } from '../types/index';
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
-import { PineconeStore, PineconeEmbeddings } from '@langchain/pinecone';
-import { SystemMessage, HumanMessage } from '@langchain/core/messages';
+import OpenAI from 'openai';
+import { OpenAIEmbeddings } from '@langchain/openai';
+import { PineconeStore } from '@langchain/pinecone';
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
 const MOCK_AI = process.env.MOCK_AI === 'true';
-const EMBED_MODEL = 'llama-text-embed-v2';
-const CHAT_MODEL = process.env.GEMINI_MODEL ?? 'gemini-1.5-pro';
+const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
+const EMBED_MODEL = process.env.NVIDIA_EMBED_MODEL ?? 'nvidia/nv-embedqa-e5-v5';
+const CHAT_MODEL = process.env.NVIDIA_MODEL ?? 'deepseek-ai/deepseek-v4-flash';
 const SIMILARITY_THRESHOLD = 0.7;
-const DEDUP_THRESHOLD = 0.95;       // above this → update hitCount instead of inserting
-const TTL_MS = 180 * 24 * 3600 * 1_000;  // 6 months in milliseconds
+const DEDUP_THRESHOLD = 0.95;
+const TTL_MS = 180 * 24 * 3600 * 1_000;
 const PINECONE_TOP_K = 3;
 
-// ── SendStrategy pattern ───────────────────────────────────────────────────────
+// ── Strategy types ─────────────────────────────────────────────────────────────
 
 type RcaStrategy = (anomaly: Anomaly) => Promise<RcaResult>;
 type IngestStrategy = (payload: ResolutionPayload) => Promise<IngestResult>;
@@ -26,30 +27,34 @@ interface IngestResult {
   recordId: string;
 }
 
-// ── LangChain Initializers ─────────────────────────────────────────────────────
+// ── NVIDIA NIM client initializers ─────────────────────────────────────────────
 
-let _embeddings: PineconeEmbeddings | null = null;
-function getEmbeddings(): PineconeEmbeddings {
+let _embeddings: OpenAIEmbeddings | null = null;
+function getEmbeddings(): OpenAIEmbeddings {
   if (!_embeddings) {
-    _embeddings = new PineconeEmbeddings({
+    _embeddings = new OpenAIEmbeddings({
       model: EMBED_MODEL,
-      apiKey: process.env.PINECONE_API_KEY,
+      apiKey: process.env.NVIDIA_API_KEY,
+      configuration: { baseURL: NVIDIA_BASE_URL },
     });
   }
   return _embeddings;
 }
 
-let _chatModel: ChatGoogleGenerativeAI | null = null;
-function getChatModel(): ChatGoogleGenerativeAI {
-  if (!_chatModel) {
-    _chatModel = new ChatGoogleGenerativeAI({
-      model: CHAT_MODEL,
-      temperature: 0.2,
-      maxOutputTokens: 512,
-      apiKey: process.env.GEMINI_API_KEY,
+let _openaiClient: OpenAI | null = null;
+function getOpenAIClient(): OpenAI {
+  if (!_openaiClient) {
+    _openaiClient = new OpenAI({
+      apiKey: process.env.NVIDIA_API_KEY ?? '',
+      baseURL: NVIDIA_BASE_URL,
     });
   }
-  return _chatModel;
+  return _openaiClient;
+}
+
+// Strip DeepSeek thinking tokens from model output
+function stripThinking(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
 // ── Mock Strategies ────────────────────────────────────────────────────────────
@@ -61,8 +66,8 @@ function createMockRcaStrategy(): RcaStrategy {
       anomalyId: anomaly.id,
       source: anomaly.source,
       severity: anomaly.severity,
-      rootCause: `[MOCK] Pattern "${anomaly.matchedPattern}" detected in "${anomaly.source}". Set MOCK_AI=false and provide GEMINI_API_KEY for real analysis.`,
-      suggestedFix: '[MOCK] Provide GEMINI_API_KEY and PINECONE_API_KEY to enable AI-generated root cause analysis.',
+      rootCause: `[MOCK] Pattern "${anomaly.matchedPattern}" detected in "${anomaly.source}". Set MOCK_AI=false and provide NVIDIA_API_KEY for real analysis.`,
+      suggestedFix: '[MOCK] Provide NVIDIA_API_KEY to enable AI-generated root cause analysis.',
       confidence: 0,
       generatedAt: new Date().toISOString(),
       historicalMatches: 0,
@@ -74,21 +79,12 @@ function createMockIngestStrategy(): IngestStrategy {
   return async (payload: ResolutionPayload): Promise<IngestResult> => {
     const recordId = `mock-golden-${payload.anomalyId || Date.now()}-${Date.now()}`;
     const tagList = Array.isArray(payload.tags) ? payload.tags.filter(Boolean) : [payload.source];
-    
-    // Mirror new record in PostgreSQL for the golden-records list page
+
     getPool().query(
       `INSERT INTO "GoldenRecord" (id, "pineconeId", title, issue, resolution, source, tags, "hitCount", "createdAt", "updatedAt")
        VALUES ($1, $2, $3, $4, $5, $6, $7, 1, NOW(), NOW())
        ON CONFLICT ("pineconeId") DO UPDATE SET "hitCount" = "GoldenRecord"."hitCount" + 1, "updatedAt" = NOW()`,
-      [
-        uuidv4(),
-        recordId,
-        payload.issue.slice(0, 60),
-        payload.issue,
-        payload.resolution,
-        payload.source,
-        JSON.stringify(tagList),
-      ],
+      [uuidv4(), recordId, payload.issue.slice(0, 60), payload.issue, payload.resolution, payload.source, JSON.stringify(tagList)],
     ).catch(() => {});
 
     console.log(`[RagPipeline] MOCK — ingested Golden Record to DB (skipped Pinecone): ${recordId}`);
@@ -135,10 +131,9 @@ function createRealRcaStrategy(): RcaStrategy {
     const index = getPineconeIndex();
     const vectorStore = new PineconeStore(getEmbeddings(), { pineconeIndex: index });
 
-    // Langchain RAG query
     const results = await vectorStore.similaritySearchWithScore(anomaly.logSnippet, PINECONE_TOP_K);
     const strongMatches = results.filter(([_, score]) => score >= SIMILARITY_THRESHOLD);
-    
+
     const historicalContext = strongMatches.map(([doc]) => {
       const meta = doc.metadata as unknown as GoldenRecordMetadata;
       return `Issue: ${meta.issue}\nResolution: ${meta.resolution}`;
@@ -146,19 +141,26 @@ function createRealRcaStrategy(): RcaStrategy {
 
     const prompt = buildRcaPrompt(anomaly, historicalContext);
     let parsed: LlmResponse = {};
-    
-    try {
-      const model = getChatModel();
-      const response = await model.invoke([new HumanMessage(prompt)]);
 
-      // Attempt to clean any potential markdown formatting (e.g. ```json ... ```)
-      let content = response.content?.toString() ?? '';
+    try {
+      const client = getOpenAIClient();
+      const rcaParams: OpenAI.ChatCompletionCreateParamsNonStreaming = {
+        model: CHAT_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 1,
+        top_p: 0.95,
+        max_tokens: 4096,
+        stream: false,
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (rcaParams as any).chat_template_kwargs = { thinking: false };
+      const completion = await client.chat.completions.create(rcaParams);
+      let content = completion.choices[0]?.message?.content ?? '';
+      content = stripThinking(content);
       content = content.replace(/^```json/i, '').replace(/```$/, '').trim();
-      
       if (content) parsed = JSON.parse(content) as LlmResponse;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[RagPipeline] LLM call failed: ${message}`);
+      console.error(`[RagPipeline] LLM call failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     return {
@@ -174,32 +176,21 @@ function createRealRcaStrategy(): RcaStrategy {
   };
 }
 
-// ── Real Ingest Strategy (Post-Resolution Pipeline) ───────────────────────────
+// ── Real Ingest Strategy ───────────────────────────────────────────────────────
 
 function createRealIngestStrategy(): IngestStrategy {
   return async (payload: ResolutionPayload): Promise<IngestResult> => {
     const index = getPineconeIndex();
     const combinedText = `Issue: ${payload.issue} Resolution: ${payload.resolution}`;
-    
-    // We can still use the raw embeddings for precise ID-based upsert and dedup
+
     const embeddingArray = await getEmbeddings().embedQuery(combinedText);
 
-    // Deduplication: query for near-identical records before inserting
-    const existing = await index.query({
-      vector: embeddingArray,
-      topK: 1,
-      includeMetadata: true,
-    });
-
+    const existing = await index.query({ vector: embeddingArray, topK: 1, includeMetadata: true });
     const topMatch = existing.matches[0];
 
     if (topMatch && (topMatch.score ?? 0) >= DEDUP_THRESHOLD) {
       const meta = topMatch.metadata as unknown as GoldenRecordMetadata;
-      await index.update({
-        id: topMatch.id,
-        metadata: { hitCount: meta.hitCount + 1 },
-      });
-      // Mirror hitCount update in PostgreSQL
+      await index.update({ id: topMatch.id, metadata: { hitCount: meta.hitCount + 1 } });
       getPool().query(
         `UPDATE "GoldenRecord" SET "hitCount" = "hitCount" + 1, "updatedAt" = NOW() WHERE "pineconeId" = $1`,
         [topMatch.id],
@@ -220,35 +211,19 @@ function createRealIngestStrategy(): IngestStrategy {
       tags: tagList,
     };
 
-    // Upsert directly to pinecone index for explicit ID and metadata control
     await index.upsert([{
       id: recordId,
       values: embeddingArray,
       metadata: metadata as unknown as Record<string, string | number | boolean | string[]>,
-      // To play nicely with Langchain PineconeStore, we also inject text field:
     }]);
-    
-    // Wait, Langchain expects 'text' in metadata to retrieve it during search!
-    // We should ensure 'text' is set so similaritySearchWithScore returns the content.
-    await index.update({
-      id: recordId,
-      metadata: { text: combinedText }
-    }).catch(() => {});
 
-    // Mirror new record in PostgreSQL for the golden-records list page
+    await index.update({ id: recordId, metadata: { text: combinedText } }).catch(() => {});
+
     getPool().query(
       `INSERT INTO "GoldenRecord" (id, "pineconeId", title, issue, resolution, source, tags, "hitCount", "createdAt", "updatedAt")
        VALUES ($1, $2, $3, $4, $5, $6, $7, 1, NOW(), NOW())
        ON CONFLICT ("pineconeId") DO UPDATE SET "hitCount" = "GoldenRecord"."hitCount" + 1, "updatedAt" = NOW()`,
-      [
-        uuidv4(),
-        recordId,
-        payload.issue.slice(0, 60),
-        payload.issue,
-        payload.resolution,
-        payload.source,
-        JSON.stringify(tagList),
-      ],
+      [uuidv4(), recordId, payload.issue.slice(0, 60), payload.issue, payload.resolution, payload.source, JSON.stringify(tagList)],
     ).catch(() => {});
 
     console.log(`[RagPipeline] Ingested new Golden Record: ${recordId}`);
@@ -256,15 +231,10 @@ function createRealIngestStrategy(): IngestStrategy {
   };
 }
 
-// ── Strategy Resolution (module-load time, once) ──────────────────────────────
+// ── Strategy resolution ────────────────────────────────────────────────────────
 
-const _rcaStrategy: RcaStrategy = MOCK_AI
-  ? createMockRcaStrategy()
-  : createRealRcaStrategy();
-
-const _ingestStrategy: IngestStrategy = MOCK_AI
-  ? createMockIngestStrategy()
-  : createRealIngestStrategy();
+const _rcaStrategy: RcaStrategy = MOCK_AI ? createMockRcaStrategy() : createRealRcaStrategy();
+const _ingestStrategy: IngestStrategy = MOCK_AI ? createMockIngestStrategy() : createRealIngestStrategy();
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
